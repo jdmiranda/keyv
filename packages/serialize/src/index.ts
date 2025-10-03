@@ -1,5 +1,15 @@
 import { Buffer } from "node:buffer";
 
+// Serialization cache for primitive values and common objects
+const serializationCache = new Map<string, string>();
+const MAX_CACHE_SIZE = 1000;
+
+// Fast path for primitive values
+const isPrimitive = (value: any): boolean => {
+	const type = typeof value;
+	return value === null || value === undefined || type === 'string' || type === 'number' || type === 'boolean';
+};
+
 // Improved version of the deprecated `json-buffer` (https://github.com/dominictarr/json-buffer) package.
 // These default functionalities can be improved separately from the dependant packages.
 // biome-ignore lint/suspicious/noExplicitAny: allowed
@@ -57,6 +67,24 @@ const _serialize = (data: any, escapeColonStrings: boolean = true): string => {
 
 // biome-ignore lint/suspicious/noExplicitAny: allowed
 export const defaultSerialize = (data: any): string => {
+	// Fast path for primitive values
+	if (isPrimitive(data)) {
+		const cacheKey = `${typeof data}:${String(data)}`;
+		const cached = serializationCache.get(cacheKey);
+		if (cached !== undefined) {
+			return cached;
+		}
+
+		const result = _serialize(data, true);
+
+		// Cache primitive values (with size limit)
+		if (serializationCache.size < MAX_CACHE_SIZE) {
+			serializationCache.set(cacheKey, result);
+		}
+
+		return result;
+	}
+
 	return _serialize(data, true);
 };
 

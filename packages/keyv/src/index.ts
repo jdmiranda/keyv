@@ -1200,7 +1200,10 @@ export class Keyv<GenericValue = any> extends EventManager {
 			});
 		}
 
-		return this._serialize(data);
+		// Synchronous fast path - check if serialize returns a string directly
+		const result = this._serialize(data);
+		// If result is a Promise, await it; otherwise return directly
+		return result instanceof Promise ? await result : result;
 	}
 
 	public async deserializeData<T>(
@@ -1219,7 +1222,11 @@ export class Keyv<GenericValue = any> extends EventManager {
 		}
 
 		if (typeof data === "string") {
-			return this._deserialize(data);
+			// Synchronous fast path - check if deserialize returns directly
+			const result = this._deserialize(data);
+			return (result instanceof Promise ? await result : result) as
+				| DeserializedData<T>
+				| undefined;
 		}
 
 		return undefined;

@@ -124,10 +124,14 @@ export class KeyvGenericStore extends EventManager implements KeyvStoreAdapter {
 			return undefined;
 		}
 
-		// Check if it is expired
-		if (data.expires && Date.now() > data.expires) {
-			this._store.delete(keyPrefix);
-			return undefined;
+		// Fast path: Check expiration with optimized logic
+		const expires = data.expires;
+		if (expires !== undefined && expires !== null) {
+			const now = Date.now();
+			if (now > expires) {
+				this._store.delete(keyPrefix);
+				return undefined;
+			}
 		}
 
 		return data as T;
@@ -135,7 +139,9 @@ export class KeyvGenericStore extends EventManager implements KeyvStoreAdapter {
 
 	async set(key: string, value: any, ttl?: number): Promise<boolean> {
 		const keyPrefix = this.getKeyPrefix(key, this.getNamespace());
-		const data = { value, expires: ttl ? Date.now() + ttl : undefined };
+		// Optimize: Only calculate expires if ttl is provided
+		const expires = ttl !== undefined && ttl > 0 ? Date.now() + ttl : undefined;
+		const data = { value, expires };
 		this._store.set(keyPrefix, data, ttl);
 		return true;
 	}
@@ -163,13 +169,32 @@ export class KeyvGenericStore extends EventManager implements KeyvStoreAdapter {
 	}
 
 	async getMany<T>(keys: string[]): Promise<Array<StoredData<T | undefined>>> {
-		const values = [];
-		for (const key of keys) {
-			const value = await this.get(key);
-			values.push(value);
+		// Optimize: Pre-allocate array and use direct Map access
+		const values: Array<StoredData<T | undefined>> = new Array(keys.length);
+		const now = Date.now();
+		const namespace = this.getNamespace();
+
+		for (let i = 0; i < keys.length; i++) {
+			const keyPrefix = this.getKeyPrefix(keys[i], namespace);
+			const data = this._store.get(keyPrefix) as CacheItemStore;
+
+			if (!data) {
+				values[i] = undefined;
+				continue;
+			}
+
+			// Fast expiration check
+			const expires = data.expires;
+			if (expires !== undefined && expires !== null && now > expires) {
+				this._store.delete(keyPrefix);
+				values[i] = undefined;
+				continue;
+			}
+
+			values[i] = data as T;
 		}
 
-		return values as Array<StoredData<T | undefined>>;
+		return values;
 	}
 
 	async deleteMany(keys: string[]): Promise<boolean> {
